@@ -16,11 +16,11 @@
   #cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);background:#06080f;z-index:0;filter:brightness(.95);}
   #scrim{position:absolute;inset:0;z-index:1;background:#06080f;opacity:.3;pointer-events:none;}
   #view{position:absolute;inset:0;width:100%;height:100%;z-index:2;cursor:none;}
-  #opacityCtl{position:absolute;left:14px;bottom:20px;z-index:8;display:flex;align-items:center;gap:10px;
-    padding:9px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--line);
-    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);font-size:12px;color:var(--muted);}
-  #opacityCtl input{width:118px;height:4px;accent-color:#00f0ff;}
-  #opacityCtl b{color:#00f0ff;font-family:var(--display);}
+  #opacityCtl{position:absolute;right:12px;top:50%;transform:translateY(-50%);z-index:8;display:flex;flex-direction:column;align-items:center;gap:9px;
+    padding:14px 10px;border-radius:16px;background:var(--panel);border:1px solid var(--line);
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);font-size:13px;color:var(--muted);}
+  #opacityCtl input[type=range]{-webkit-appearance:slider-vertical;appearance:slider-vertical;writing-mode:vertical-lr;direction:rtl;width:10px;height:170px;accent-color:#00f0ff;}
+  #opacityCtl b{color:#00f0ff;font-family:var(--display);font-size:12px;}
 
   .brand{position:absolute;top:14px;left:14px;z-index:7;display:flex;align-items:center;gap:10px;
     padding:9px 13px;border-radius:14px;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}
@@ -128,8 +128,9 @@
   </div>
 
   <div class="hint" id="hint">হাত নাড়িয়ে তাক করো → pinch করে গুলি 🔫</div>
-  <div id="opacityCtl"><span>🎚️ ট্রান্সপারেন্সি <b id="opacityVal">70%</b></span>
-    <input id="opacitySlider" type="range" min="0" max="100" value="70"></div>
+  <div id="opacityCtl"><span>🎚️</span>
+    <input id="opacitySlider" type="range" min="0" max="100" value="70" aria-label="transparency">
+    <b id="opacityVal">70%</b></div>
   <button id="recBtn" class="recbtn">⏺ রেকর্ড</button>
   <div id="recTime" class="rectime"><span class="rd"></span>REC&nbsp;<span id="recT">0:00</span></div>
   <div id="recDone" class="recdone"><span id="rdMsg">🎬 ভিডিও তৈরি!</span>
@@ -492,9 +493,26 @@ function drawRec(){
   else{rcx.fillStyle="#06080f";rcx.fillRect(0,0,RW,RH);}
   const so=(100-(+slider.value))/100;if(so>0){rcx.fillStyle="rgba(6,8,15,"+so+")";rcx.fillRect(0,0,RW,RH);}
   rcx.drawImage(canvas,0,0,RW,RH);
-  rcx.fillStyle="rgba(255,255,255,.96)";rcx.font="700 "+Math.round(RH*0.028)+"px 'Space Grotesk',sans-serif";
-  rcx.textAlign="left";rcx.fillText("Magic Hunt · by RAZ",RW*0.04,RH*0.062);
-  rcx.textAlign="right";rcx.fillText("Time "+Math.max(0,Math.ceil(ROUND_TIME-elapsed))+"s   Score "+score+"   Hits "+hits,RW*0.96,RH*0.062);
+  drawRecHUD();
+}
+function rcRound(x,y,w,h,r){rcx.beginPath();if(rcx.roundRect)rcx.roundRect(x,y,w,h,r);else rcx.rect(x,y,w,h);}
+function drawRecHUD(){
+  const FS=Math.max(12,Math.round(RH*0.024)), pad=Math.round(RH*0.016), h=FS*2.1, r=h/2;
+  rcx.textBaseline="middle";rcx.textAlign="left";
+  rcx.font="700 "+FS+"px 'Space Grotesk',sans-serif";const w1=rcx.measureText("Magic Hunt").width;
+  rcx.font=Math.round(FS*0.78)+"px 'Space Grotesk',sans-serif";const w2=rcx.measureText("by RAZ").width;
+  const bw=FS*1.9+w1+FS*0.5+w2+FS*0.7;
+  rcx.fillStyle="rgba(14,18,32,.62)";rcRound(pad,pad,bw,h,r);rcx.fill();
+  rcx.fillStyle="#b14bff";rcRound(pad+FS*0.55,pad+h/2-FS*0.45,FS*0.9,FS*0.9,FS*0.28);rcx.fill();
+  rcx.fillStyle="#fff";rcx.font="700 "+FS+"px 'Space Grotesk',sans-serif";rcx.fillText("Magic Hunt",pad+FS*1.9,pad+h/2);
+  rcx.fillStyle="#8b93b0";rcx.font=Math.round(FS*0.78)+"px 'Space Grotesk',sans-serif";rcx.fillText("by RAZ",pad+FS*1.9+w1+FS*0.5,pad+h/2+FS*0.06);
+  rcx.textAlign="right";let py=pad;
+  const items=[["⏱ "+Math.max(0,Math.ceil(ROUND_TIME-elapsed))+"s","#00f0ff"],["⭐ "+score,"#ffd23f"],["🦆 "+hits,"#aaff66"]];
+  for(const [txt,col] of items){
+    rcx.font="700 "+FS+"px 'Space Grotesk',sans-serif";const w=rcx.measureText(txt).width+FS*1.4,x=RW-pad-w;
+    rcx.fillStyle="rgba(14,18,32,.62)";rcRound(x,py,w,h,r);rcx.fill();
+    rcx.fillStyle=col;rcx.fillText(txt,RW-pad-FS*0.7,py+h/2);py+=h+pad*0.55;}
+  rcx.textBaseline="alphabetic";
 }
 recBtn.onclick=()=>recording?stopRec():startRec();
 $("rdShare").onclick=shareVid;$("rdSave").onclick=downloadVid;$("rdClose").onclick=()=>recDone.classList.remove("on");
