@@ -97,6 +97,20 @@
   .confetti{position:absolute;top:-16px;width:9px;height:15px;border-radius:2px;z-index:1;opacity:.95;animation:fall linear forwards;}
   @keyframes fall{to{transform:translateY(112vh) rotate(760deg);opacity:.3}}
   @media (prefers-reduced-motion:reduce){*{animation-duration:.01s!important}}
+  .recbtn{position:absolute;right:14px;bottom:20px;z-index:8;font-family:var(--bn);font-weight:700;font-size:14px;color:#fff;
+    background:linear-gradient(135deg,#ff3b3b,#b14bff);border:none;border-radius:999px;padding:12px 20px;cursor:pointer;box-shadow:0 6px 20px rgba(255,59,59,.35);}
+  .recbtn.rec{animation:recPulse 1.1s ease-in-out infinite;}
+  @keyframes recPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,59,59,.55)}50%{box-shadow:0 0 0 12px rgba(255,59,59,0)}}
+  .rectime{position:absolute;top:60px;left:50%;transform:translateX(-50%);z-index:8;display:none;align-items:center;gap:7px;
+    background:rgba(170,25,25,.9);color:#fff;font-size:13px;font-weight:700;padding:6px 14px;border-radius:999px;}
+  .rectime.on{display:flex;} .rectime .rd{width:9px;height:9px;border-radius:50%;background:#fff;animation:blink 1s steps(2,end) infinite;}
+  @keyframes blink{50%{opacity:.15}}
+  .recdone{position:absolute;left:50%;bottom:84px;transform:translateX(-50%);z-index:12;display:none;flex-direction:column;gap:10px;align-items:center;
+    background:rgba(14,20,38,.96);border:1px solid var(--line);border-radius:18px;padding:15px 20px;box-shadow:0 0 40px rgba(0,240,255,.25);backdrop-filter:blur(12px);max-width:90vw;text-align:center;}
+  .recdone.on{display:flex;} .recdone>span{font-weight:700;font-size:15px;color:#fff;}
+  .rd-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
+  .rd-btns .btn{padding:9px 16px;font-size:13px;}
+  .rd-btns #rdSave{background:rgba(255,255,255,.12);color:#fff;} .rd-btns #rdClose{background:transparent;color:var(--muted);border:1px solid var(--line);}
 </style>
 </head>
 <body>
@@ -116,6 +130,12 @@
   <div class="hint" id="hint">হাত নাড়িয়ে তাক করো → pinch করে গুলি 🔫</div>
   <div id="opacityCtl"><span>🎚️ ট্রান্সপারেন্সি <b id="opacityVal">70%</b></span>
     <input id="opacitySlider" type="range" min="0" max="100" value="70"></div>
+  <button id="recBtn" class="recbtn">⏺ রেকর্ড</button>
+  <div id="recTime" class="rectime"><span class="rd"></span>REC&nbsp;<span id="recT">0:00</span></div>
+  <div id="recDone" class="recdone"><span id="rdMsg">🎬 ভিডিও তৈরি!</span>
+    <div class="rd-btns"><button id="rdShare" class="btn">📤 শেয়ার</button>
+    <button id="rdSave" class="btn">⬇ ডাউনলোড</button>
+    <button id="rdClose" class="btn">✕</button></div></div>
 </div>
 
 <!-- gate -->
@@ -212,9 +232,12 @@ function pinchRatio(lm){const d=Math.hypot(lm[4].x-lm[8].x,lm[4].y-lm[8].y);
 
 /* ---------- audio ---------- */
 let actx=null;
-function initAudio(){try{actx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}
+function initAudio(){try{actx=new (window.AudioContext||window.webkitAudioContext)();
+  masterGain=actx.createGain();masterGain.connect(actx.destination);
+  try{recDest=actx.createMediaStreamDestination();masterGain.connect(recDest);}catch(e){}
+}catch(e){}}
 function blip(freq,dur,type,vol){if(!actx)return;const o=actx.createOscillator(),g=actx.createGain();
-  o.type=type;o.frequency.value=freq;o.connect(g);g.connect(actx.destination);
+  o.type=type;o.frequency.value=freq;o.connect(g);g.connect(masterGain||actx.destination);
   const t=actx.currentTime;g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
   o.start(t);o.stop(t+dur);}
 function sndShoot(){blip(220,0.08,"square",0.18);blip(90,0.12,"sawtooth",0.12);}
@@ -379,6 +402,7 @@ function loop(ts){
   if(dt>0.05)dt=0.05;if(dt<0)dt=0;
   if(playing){elapsed+=dt;update(dt);if(elapsed>=ROUND_TIME)endGame();}
   render();
+  if(recording){drawRec();recT.textContent=fmtT(performance.now()-recStart);}
 }
 
 /* ---------- game flow ---------- */
@@ -391,6 +415,7 @@ function startGame(){
 }
 function endGame(){
   playing=false;setStatus("শেষ!","live");
+  if(recording)stopRec();
   rScore.textContent=score;rHits.textContent=hits;
   rAcc.textContent=(shots>0?Math.round(hits/shots*100):0)+"%";
   resultEl.classList.add("show");makeConfetti();
@@ -412,6 +437,67 @@ canvas.addEventListener("pointerdown",e=>{const r=canvas.getBoundingClientRect()
 const scrim=$("scrim"), slider=$("opacitySlider"), opacityVal=$("opacityVal");
 function applyOpacity(){const t=+slider.value;scrim.style.opacity=String((100-t)/100);opacityVal.textContent=t+"%";}
 slider.addEventListener("input",applyOpacity);applyOpacity();
+
+/* ---------- screen recording (webcam + game + sound → mp4/webm) ---------- */
+let masterGain=null, recDest=null;
+let recCanvas=document.createElement("canvas"), rcx=recCanvas.getContext("2d");
+let rec=null, recChunks=[], recording=false, recMime="", RW=0, RH=0, recStart=0, lastBlobURL=null, lastFile=null;
+const recBtn=$("recBtn"), recTimeEl=$("recTime"), recT=$("recT"), recDone=$("recDone"), rdMsg=$("rdMsg");
+const recSupported=!!(window.MediaRecorder && HTMLCanvasElement.prototype.captureStream);
+
+function fmtT(ms){const s=Math.floor(ms/1000);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");}
+function pickMime(){const w=["video/mp4;codecs=avc1.42E01E,mp4a.40.2","video/mp4;codecs=avc1","video/mp4",
+  "video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
+  for(const m of w){try{if(MediaRecorder.isTypeSupported(m))return m;}catch(e){}}return "";}
+
+function startRec(){
+  if(!recSupported){rdMsg.textContent="দুঃখিত, এই ব্রাউজারে রেকর্ডিং সাপোর্ট করে না।";recDone.classList.add("on");return;}
+  try{
+    RW=Math.round(W*1.5);RH=Math.round(H*1.5);recCanvas.width=RW;recCanvas.height=RH;
+    const vs=recCanvas.captureStream(30), tracks=vs.getVideoTracks();
+    if(recDest)recDest.stream.getAudioTracks().forEach(t=>tracks.push(t));
+    const stream=new MediaStream(tracks);
+    recMime=pickMime();recChunks=[];
+    rec=new MediaRecorder(stream, recMime?{mimeType:recMime,videoBitsPerSecond:6000000}:{});
+    rec.ondataavailable=e=>{if(e.data&&e.data.size)recChunks.push(e.data);};
+    rec.onstop=onRecStop; rec.start();
+    recording=true;recStart=performance.now();
+    recBtn.textContent="⏹ থামাও";recBtn.classList.add("rec");recTimeEl.classList.add("on");recDone.classList.remove("on");
+  }catch(e){console.error(e);rdMsg.textContent="রেকর্ডিং শুরু করা গেল না।";recDone.classList.add("on");}
+}
+function stopRec(){if(rec&&recording){try{rec.stop();}catch(e){}}
+  recording=false;recBtn.textContent="⏺ রেকর্ড";recBtn.classList.remove("rec");recTimeEl.classList.remove("on");}
+function onRecStop(){
+  const ext=recMime.includes("mp4")?"mp4":"webm";
+  const blob=new Blob(recChunks,{type:(recMime||"video/webm").split(";")[0]});
+  if(lastBlobURL)URL.revokeObjectURL(lastBlobURL);
+  lastBlobURL=URL.createObjectURL(blob);
+  lastFile=new File([blob],"magic-hunt-"+Date.now()+"."+ext,{type:blob.type});
+  rdMsg.textContent="🎬 ভিডিও তৈরি! ("+ext.toUpperCase()+")";recDone.classList.add("on");
+}
+async function shareVid(){
+  if(lastFile&&navigator.canShare&&navigator.canShare({files:[lastFile]})){
+    try{await navigator.share({files:[lastFile],title:"Magic Hunt by RAZ",text:"Magic Hunt 🦆🔫 by RAZ"});return;}catch(e){}
+  }
+  downloadVid();
+}
+function downloadVid(){if(!lastFile)return;const a=document.createElement("a");a.href=lastBlobURL;a.download=lastFile.name;
+  document.body.appendChild(a);a.click();a.remove();}
+function drawRec(){
+  if(!recording)return;
+  rcx.setTransform(1,0,0,1,0,0);rcx.clearRect(0,0,RW,RH);
+  const vw=video.videoWidth,vh=video.videoHeight;
+  if(vw){const s=Math.max(RW/vw,RH/vh),dw=vw*s,dh=vh*s,ox=(RW-dw)/2,oy=(RH-dh)/2;
+    rcx.save();rcx.translate(RW,0);rcx.scale(-1,1);rcx.drawImage(video,ox,oy,dw,dh);rcx.restore();}
+  else{rcx.fillStyle="#06080f";rcx.fillRect(0,0,RW,RH);}
+  const so=(100-(+slider.value))/100;if(so>0){rcx.fillStyle="rgba(6,8,15,"+so+")";rcx.fillRect(0,0,RW,RH);}
+  rcx.drawImage(canvas,0,0,RW,RH);
+  rcx.fillStyle="rgba(255,255,255,.96)";rcx.font="700 "+Math.round(RH*0.028)+"px 'Space Grotesk',sans-serif";
+  rcx.textAlign="left";rcx.fillText("Magic Hunt · by RAZ",RW*0.04,RH*0.062);
+  rcx.textAlign="right";rcx.fillText("Time "+Math.max(0,Math.ceil(ROUND_TIME-elapsed))+"s   Score "+score+"   Hits "+hits,RW*0.96,RH*0.062);
+}
+recBtn.onclick=()=>recording?stopRec():startRec();
+$("rdShare").onclick=shareVid;$("rdSave").onclick=downloadVid;$("rdClose").onclick=()=>recDone.classList.remove("on");
 
 /* ---------- loops ---------- */
 function rvfc(){runDetect();if(running)video.requestVideoFrameCallback(rvfc);}
